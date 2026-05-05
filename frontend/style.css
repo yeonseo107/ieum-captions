@@ -1,0 +1,137 @@
+:root {
+  --bg: #0a0a0a;
+  --fg: #ffffff;
+  --bubble: rgba(0, 0, 0, 0.55);
+  --accent: #4dabf7;
+  --anim-duration: 350ms;
+  --anim-easing: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+#captions {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+  padding: 6vh 6vw;
+}
+
+.caption-line {
+  font-size: clamp(2.5rem, 5vw, 6rem);
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--fg);
+  background: var(--bubble);
+  padding: 0.4em 0.8em;
+  border-radius: 0.5em;
+  margin-bottom: 0.5em;
+  max-width: 90%;
+  word-break: keep-all;
+
+  opacity: 0;
+  transform: translateY(0.6em);
+  overflow: hidden;
+  transition:
+    opacity var(--anim-duration) var(--anim-easing),
+    transform var(--anim-duration) var(--anim-easing),
+    height var(--anim-duration) var(--anim-easing),
+    margin-bottom var(--anim-duration) var(--anim-easing),
+    padding-top var(--anim-duration) var(--anim-easing),
+    padding-bottom var(--anim-duration) var(--anim-easing);
+}
+
+.caption-line.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.caption-line.removing {
+  opacity: 0;
+  height: 0 !important;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+#controls {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: rgba(15, 15, 15, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  backdrop-filter: blur(8px);
+  z-index: 10;
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+#controls.hidden {
+  opacity: 0;
+  transform: translateY(-1rem);
+  pointer-events: none;
+}
+
+#controls input {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--fg);
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.3rem;
+  width: 18rem;
+  font: inherit;
+}
+
+#controls input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#controls button {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--fg);
+  padding: 0.4rem 0.8rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+#controls button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#controls .hint {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.8rem;
+}
+
+#controls kbd {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.2rem;
+  padding: 0.05rem 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+}
