@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project planning / spec (local only)
+pre.md
+SPEC.md
+SPEC_v2.md
+SPEC_v3.md
+DEVLOG.md
+TROUBLESHOOTING.md
+
+# Audio samples (privacy)
+samples/
+*.wav
+*.mp3
+*.m4a
