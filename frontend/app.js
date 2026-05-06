@@ -3,6 +3,7 @@ const inputEl = document.getElementById('caption-input');
 const demoBtn = document.getElementById('demo-btn');
 const resetBtn = document.getElementById('reset-btn');
 const controlsEl = document.getElementById('controls');
+const wsStatusEl = document.getElementById('ws-status');
 
 const MAX_LINES = 5;
 const ANIM_MS = 350;
@@ -90,12 +91,18 @@ const WS_URL = 'ws://localhost:8765';
 const WS_RETRY_MS = 2000;
 let wsConnected = false;
 
+function setWSStatus(connected) {
+  wsStatusEl.classList.toggle('connected', connected);
+  wsStatusEl.classList.toggle('disconnected', !connected);
+}
+
 function connectWS() {
   const ws = new WebSocket(WS_URL);
 
   ws.addEventListener('open', () => {
     if (!wsConnected) console.log('[WS] STT 백엔드 연결됨');
     wsConnected = true;
+    setWSStatus(true);
   });
 
   ws.addEventListener('message', (e) => {
@@ -112,6 +119,7 @@ function connectWS() {
   ws.addEventListener('close', () => {
     if (wsConnected) console.log('[WS] 연결 끊김, 재연결 시도 중...');
     wsConnected = false;
+    setWSStatus(false);
     setTimeout(connectWS, WS_RETRY_MS);
   });
 
