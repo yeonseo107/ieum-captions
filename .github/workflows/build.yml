@@ -4,10 +4,9 @@ name: Build
 # 운용 환경(Windows N100 미니 PC)용 .msi/.exe 산출이 핵심 — macOS는 dev 검증용.
 
 on:
-  push:
-    branches: [main, feat/integration]
-  pull_request:
-    branches: [main]
+  # 자동 트리거 비활성화 (private 저장소 분 차감 회피).
+  # 빌드 필요 시: GitHub Actions 탭 → Build → "Run workflow" 버튼으로 수동 실행.
+  # 또는 자동 트리거 다시 켜고 싶으면 push/pull_request 블록 복구.
   workflow_dispatch:
 
 jobs:
