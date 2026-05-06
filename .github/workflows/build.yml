@@ -1,0 +1,40 @@
+name: Build
+
+# Tauri 셸을 macOS / Windows에서 빌드 (Python sidecar 통합 전 단계).
+# 운용 환경(Windows N100 미니 PC)용 .msi/.exe 산출이 핵심 — macOS는 dev 검증용.
+
+on:
+  push:
+    branches: [main, feat/integration]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust deps
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ieum-captions-${{ matrix.platform }}
+          path: src-tauri/target/release/bundle/
+          if-no-files-found: error
