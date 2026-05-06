@@ -1,4 +1,4 @@
-"""ieum-captions M3 통합 서버: 마이크 → faster-whisper → WebSocket 푸시.
+"""ieum-captions M3 통합 서버: 마이크 → VAD segmentation → faster-whisper → WebSocket 푸시.
 
 실행:
     source backend/.venv/bin/activate
@@ -8,22 +8,39 @@
 종료: Ctrl+C
 """
 import asyncio
+import collections
 import json
 import sys
 import time
 
 import numpy as np
 import sounddevice as sd
+import webrtcvad
 import websockets
 from faster_whisper import WhisperModel
 
+# 오디오 / 모델
 SAMPLE_RATE = 16000
 CHANNELS = 1
-DURATION_SEC = 5
 MODEL_SIZE = "large-v3-turbo"
 COMPUTE_TYPE = "int8"
-SILENCE_RMS_THRESHOLD = 0.01
 
+# VAD segmentation — 5초 고정 청크 대신 발화 단위로 잘라서 STT.
+VAD_AGGRESSIVENESS = 3          # 0(느슨)~3(엄격). 카페 등 잡음 환경 견디려면 3.
+FRAME_MS = 30                   # webrtcvad가 받는 프레임 길이 (10/20/30 중 30이 가장 안정)
+SILENCE_END_MS = 600            # 침묵이 600ms 지속되면 발화 종료로 간주
+MAX_UTTERANCE_MS = 15000        # 너무 긴 독백은 강제 컷 (그 안에서 한 번 끊고 다음 발화 계속)
+MIN_UTTERANCE_MS = 500          # 이 이하 발화는 단발성 잡음으로 보고 STT 호출 자체 안 함
+PREROLL_MS = 200                # 발화 시작 직전 200ms도 같이 transcribe (첫 음절 잘림 방지)
+UTTERANCE_QUEUE_MAX = 2         # 큐가 이 이상 쌓이면 가장 오래된 발화 버림(잡음에 실 발화가 묻히는 것 방지)
+
+FRAME_SAMPLES = SAMPLE_RATE * FRAME_MS // 1000
+SILENCE_END_FRAMES = SILENCE_END_MS // FRAME_MS
+MAX_UTTERANCE_FRAMES = MAX_UTTERANCE_MS // FRAME_MS
+MIN_UTTERANCE_SAMPLES = SAMPLE_RATE * MIN_UTTERANCE_MS // 1000
+PREROLL_FRAMES = PREROLL_MS // FRAME_MS
+
+# 네트워크
 WS_HOST = "localhost"
 WS_PORT = 8765
 
@@ -66,19 +83,49 @@ def is_hallucination(text: str) -> bool:
 clients: set = set()
 
 
-def record(duration: int) -> np.ndarray:
-    audio = sd.rec(
-        int(duration * SAMPLE_RATE),
-        samplerate=SAMPLE_RATE,
-        channels=CHANNELS,
-        dtype="float32",
-    )
-    sd.wait()
-    return audio.flatten()
+class VADSegmenter:
+    """프레임을 흘려넣으면서 발화 시작/끝을 검출. 발화가 끝나면 float32 audio를 반환."""
 
+    def __init__(self) -> None:
+        self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
+        self.preroll: collections.deque = collections.deque(maxlen=PREROLL_FRAMES)
+        self.utterance: list[np.ndarray] = []
+        self.silence_count = 0
+        self.in_speech = False
 
-def is_silent(audio: np.ndarray) -> bool:
-    return float(np.sqrt(np.mean(audio ** 2))) < SILENCE_RMS_THRESHOLD
+    def feed(self, frame_bytes: bytes) -> np.ndarray | None:
+        is_speech = self.vad.is_speech(frame_bytes, SAMPLE_RATE)
+        frame_f32 = np.frombuffer(frame_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+        if not self.in_speech:
+            self.preroll.append(frame_f32)
+            if is_speech:
+                self.in_speech = True
+                self.utterance = list(self.preroll)
+                self.utterance.append(frame_f32)
+                self.silence_count = 0
+            return None
+
+        # 발화 중
+        self.utterance.append(frame_f32)
+        self.silence_count = 0 if is_speech else self.silence_count + 1
+
+        ended_by_silence = self.silence_count >= SILENCE_END_FRAMES
+        ended_by_cap = len(self.utterance) >= MAX_UTTERANCE_FRAMES
+        if ended_by_silence or ended_by_cap:
+            audio = np.concatenate(self.utterance)
+            self._reset()
+            # 너무 짧은 발화는 단발성 잡음(기침, 식기 소리 등)일 가능성이 커서 STT 안 돌림.
+            if len(audio) < MIN_UTTERANCE_SAMPLES:
+                return None
+            return audio
+        return None
+
+    def _reset(self) -> None:
+        self.in_speech = False
+        self.preroll.clear()
+        self.utterance = []
+        self.silence_count = 0
 
 
 async def broadcast(message: dict) -> None:
@@ -91,36 +138,90 @@ async def broadcast(message: dict) -> None:
     )
 
 
-async def stt_loop(model: WhisperModel) -> None:
+async def capture_and_segment(seg: VADSegmenter, utterance_q: asyncio.Queue) -> None:
+    """마이크 스트림 → VAD segmenter → 발화가 끝날 때마다 utterance_q에 audio를 넣음."""
     loop = asyncio.get_running_loop()
-    print("[STT] 루프 시작. 마이크 입력 대기 중.")
-    while True:
-        audio = await loop.run_in_executor(None, record, DURATION_SEC)
-        if is_silent(audio):
-            continue
+    frame_q: asyncio.Queue = asyncio.Queue()
 
-        def transcribe() -> str:
-            segs, _ = model.transcribe(
-                audio,
-                language="ko",
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500),
-                # 이전 출력을 컨텍스트로 끌어다 쓰지 않음 — 환각 패턴 자기강화 방지.
-                condition_on_previous_text=False,
-            )
-            return " ".join(s.text.strip() for s in segs)
+    def callback(indata, frames, time_info, status):
+        if status:
+            print(f"[mic] {status}", file=sys.stderr)
+        # webrtcvad는 16-bit PCM bytes를 받음 — float32 [-1,1] → int16으로 변환.
+        pcm = (indata[:, 0] * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
+        loop.call_soon_threadsafe(frame_q.put_nowait, pcm)
+
+    stream = sd.InputStream(
+        samplerate=SAMPLE_RATE,
+        channels=CHANNELS,
+        dtype="float32",
+        blocksize=FRAME_SAMPLES,
+        callback=callback,
+    )
+    stream.start()
+    print("[mic] 스트림 시작 (VAD segmentation 모드)")
+
+    try:
+        while True:
+            frame = await frame_q.get()
+            audio = seg.feed(frame)
+            if audio is not None:
+                duration = len(audio) / SAMPLE_RATE
+                # 큐 가득 차면 가장 오래된 거 버리고 새 발화 우선 (잡음 누적으로 실 발화 지연되는 것 방지).
+                while utterance_q.qsize() >= UTTERANCE_QUEUE_MAX:
+                    try:
+                        dropped = utterance_q.get_nowait()
+                        dropped_dur = len(dropped) / SAMPLE_RATE
+                        print(f"[큐] 누적으로 발화 폐기 — {dropped_dur:.2f}s")
+                    except asyncio.QueueEmpty:
+                        break
+                print(f"[VAD] 발화 종료 — {duration:.2f}s")
+                await utterance_q.put(audio)
+    finally:
+        stream.stop()
+        stream.close()
+
+
+async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> None:
+    """utterance_q에서 발화 audio를 꺼내 STT(직렬) → broadcast.
+
+    캡처/세그멘터 코루틴과 분리되어 있어, transcribe 도중에도 다음 발화 검출은 계속 진행됨.
+    """
+    loop = asyncio.get_running_loop()
+
+    def transcribe(audio: np.ndarray) -> str:
+        segs, _ = model.transcribe(
+            audio,
+            language="ko",
+            # 이미 webrtcvad로 발화 단위로 잘랐으니 Silero VAD는 다시 안 돌림.
+            vad_filter=False,
+            # 이전 출력을 컨텍스트로 끌어다 쓰지 않음 — 환각 패턴 자기강화 방지.
+            condition_on_previous_text=False,
+            # 짧은 발화 + 잡음에서 기본 [0.0..1.0] temperature fallback이 6배 느려지게 하므로 단일값으로 고정.
+            temperature=0.0,
+            beam_size=1,
+            # 자막 출력에 timestamp 안 쓰니 디코딩 비용 절감.
+            without_timestamps=True,
+            # 모델이 "이건 무음/잡음" 으로 판단하는 임계 — 잡음 audio에서 환각 출력 폐기 강화.
+            no_speech_threshold=0.8,
+        )
+        return " ".join(s.text.strip() for s in segs).strip()
+
+    while True:
+        audio = await utterance_q.get()
+        duration = len(audio) / SAMPLE_RATE
 
         t0 = time.perf_counter()
-        text = await loop.run_in_executor(None, transcribe)
+        text = await loop.run_in_executor(None, transcribe, audio)
         elapsed = time.perf_counter() - t0
+
         if not text:
             continue
         if is_hallucination(text):
             print(f"[필터] {text!r} (환각 후보)")
             continue
 
-        rtf = elapsed / DURATION_SEC
-        print(f"[STT] {text}  (지연 {elapsed:.2f}s, RTF {rtf:.2f})")
+        rtf = elapsed / duration if duration > 0 else 0.0
+        print(f"[STT] {text}  (발화 {duration:.2f}s, 처리 {elapsed:.2f}s, RTF {rtf:.2f})")
         await broadcast({"type": "caption", "text": text})
 
 
@@ -140,8 +241,14 @@ async def main() -> None:
     model = WhisperModel(MODEL_SIZE, compute_type=COMPUTE_TYPE)
     print(f"[WS 서버] ws://{WS_HOST}:{WS_PORT}")
 
+    seg = VADSegmenter()
+    utterance_q: asyncio.Queue = asyncio.Queue()
+
     async with websockets.serve(handle_client, WS_HOST, WS_PORT):
-        await stt_loop(model)
+        await asyncio.gather(
+            capture_and_segment(seg, utterance_q),
+            transcribe_worker(model, utterance_q),
+        )
 
 
 if __name__ == "__main__":
