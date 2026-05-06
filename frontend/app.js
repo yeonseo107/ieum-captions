@@ -23,13 +23,8 @@ function addCaption(text) {
   requestAnimationFrame(() => line.classList.add('visible'));
 
   if (lines.length > MAX_LINES) {
-    const oldest = lines.shift();
-    // 명시적 픽셀값으로 height을 고정한 뒤 .removing이 0으로 트랜지션하게 함.
-    // (max-height 보간이 브라우저에서 매끄럽지 않아 덜컹거림이 발생.)
-    oldest.style.height = oldest.offsetHeight + 'px';
-    oldest.getBoundingClientRect();
-    oldest.classList.add('removing');
-    setTimeout(() => oldest.remove(), ANIM_MS + 50);
+    // 가장 오래된 줄은 즉시 DOM에서 제거. 위로 미는 애니메이션 없음 — 남은 줄들은 한 프레임 안에 새 위치로 스냅.
+    lines.shift().remove();
   }
 }
 
@@ -88,3 +83,41 @@ document.addEventListener('keydown', (e) => {
 });
 
 inputEl.focus();
+
+// --- WebSocket 클라이언트 (M3: STT 백엔드 연결) ---
+// backend/server.py가 떠 있으면 자동 연결, 없으면 2초마다 재시도. 수동 입력은 항상 동작.
+const WS_URL = 'ws://localhost:8765';
+const WS_RETRY_MS = 2000;
+let wsConnected = false;
+
+function connectWS() {
+  const ws = new WebSocket(WS_URL);
+
+  ws.addEventListener('open', () => {
+    if (!wsConnected) console.log('[WS] STT 백엔드 연결됨');
+    wsConnected = true;
+  });
+
+  ws.addEventListener('message', (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'caption' && msg.text) {
+        addCaption(msg.text);
+      }
+    } catch (err) {
+      console.warn('[WS] 잘못된 메시지', e.data);
+    }
+  });
+
+  ws.addEventListener('close', () => {
+    if (wsConnected) console.log('[WS] 연결 끊김, 재연결 시도 중...');
+    wsConnected = false;
+    setTimeout(connectWS, WS_RETRY_MS);
+  });
+
+  ws.addEventListener('error', () => {
+    // 연결 실패는 close로 이어짐 — 별도 로그 안 함
+  });
+}
+
+connectWS();

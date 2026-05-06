@@ -50,24 +50,12 @@ body {
   overflow: hidden;
   transition:
     opacity var(--anim-duration) var(--anim-easing),
-    transform var(--anim-duration) var(--anim-easing),
-    height var(--anim-duration) var(--anim-easing),
-    margin-bottom var(--anim-duration) var(--anim-easing),
-    padding-top var(--anim-duration) var(--anim-easing),
-    padding-bottom var(--anim-duration) var(--anim-easing);
+    transform var(--anim-duration) var(--anim-easing);
 }
 
 .caption-line.visible {
   opacity: 1;
   transform: translateY(0);
-}
-
-.caption-line.removing {
-  opacity: 0;
-  height: 0 !important;
-  margin-bottom: 0;
-  padding-top: 0;
-  padding-bottom: 0;
 }
 
 #controls {
