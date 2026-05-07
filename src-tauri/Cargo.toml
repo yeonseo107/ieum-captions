@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+description = "ieum-captions — 거실 STT 자막 앱 (외할머니용)"
+authors = ["Cho Yeonseo <cyseo107@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/yeonseo107/ieum-captions"
 edition = "2021"
 rust-version = "1.77.2"
 
