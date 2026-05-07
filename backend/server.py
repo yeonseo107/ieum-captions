@@ -10,9 +10,15 @@
 import asyncio
 import collections
 import json
+import multiprocessing
 import re
 import sys
 import time
+
+# PyInstaller frozen binary에서 stdout이 fully-buffered로 잡혀 Tauri/리다이렉트 환경에서 로그가
+# 종료 시점에야 보이는 문제 회피. dev(터미널 attached)에선 이미 line-buffered라 영향 없음.
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
 import numpy as np
 import sounddevice as sd
@@ -302,6 +308,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # PyInstaller frozen 바이너리에서 multiprocessing.spawn된 자식 프로세스가 main 스크립트를
+    # 처음부터 재실행해 모델 재로드 + 포트 재bind를 시도하는 fork bomb 방지.
+    multiprocessing.freeze_support()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

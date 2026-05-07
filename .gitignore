@@ -27,10 +27,9 @@ share/python-wheels/
 MANIFEST
 
 # PyInstaller
-#   Usually these files are written by a python script from a template
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
+#   build/ dist/ 산출물은 위 'Distribution / packaging' 블록에서 이미 무시됨.
+#   .spec 파일은 빌드 재현 위해 git에 트래킹.
 *.manifest
-*.spec
 
 # Installer logs
 pip-log.txt

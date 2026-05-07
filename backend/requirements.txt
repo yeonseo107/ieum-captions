@@ -3,3 +3,6 @@ sounddevice>=0.5.0
 numpy>=1.24
 websockets>=13.0
 webrtcvad-wheels>=2.0
+
+# 배포용 — server.py를 단일 실행 파일로 묶을 때만 필요. 런타임 의존성 아님.
+pyinstaller>=6.0
