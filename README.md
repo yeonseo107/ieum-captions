@@ -1,6 +1,7 @@
 # ieum-captions
 
-한국어 발화를 실시간으로 자막화해 화면에 누적 표시하는 데스크톱 앱. 청각이 불편한 사용자의 일상 대화 보조를 일차 목적으로 설계되었습니다. (`ieum`은 "이음" — 잇다·연결하다의 음역)
+한국어 발화를 실시간으로 자막화해 화면에 누적 표시하는 데스크톱 앱.
+청각이 불편한 사용자의 일상 대화 보조를 일차 목적으로 설계되었습니다.
 
 - 마이크 입력 → VAD 기반 발화 단위 분리 → faster-whisper 한국어 STT → WebSocket → Tauri Webview 자막 UI
 - macOS / Windows 단일 인스톨러 배포 — Python 런타임 사전 설치 불필요
@@ -89,7 +90,8 @@ pip install -r backend/requirements.txt
 cargo tauri dev
 ```
 
-`cargo tauri dev`는 debug 빌드에서 `backend/.venv`의 Python 인터프리터로 `server.py`를 직접 실행합니다. PyInstaller 빌드는 release 빌드 / 배포 인스톨러용으로만 사용됩니다.
+`cargo tauri dev`는 debug 빌드에서 `backend/.venv`의 Python 인터프리터로 `server.py`를 직접 실행합니다.
+PyInstaller 빌드는 release 빌드 / 배포 인스톨러용으로만 사용됩니다.
 
 ## 배포 빌드
 
