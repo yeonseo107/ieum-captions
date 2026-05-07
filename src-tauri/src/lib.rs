@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Manager, RunEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 // Python sidecar 자식 프로세스 핸들 보관 (Tauri 종료 시 정리용).
 struct PythonSidecar(Mutex<Option<Child>>);
@@ -52,6 +53,12 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(sidecar_state)
+        // 시작프로그램 자동 등록 — Windows: HKCU\...\Run 레지스트리, macOS: ~/Library/LaunchAgents plist.
+        // dev에선 enable 호출 안 함 — 개발 중에 시작프로그램 등록되면 곤란.
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -59,6 +66,13 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            } else {
+                // release 첫 실행 시 자동 등록. enable()은 idempotent라 매번 호출해도 OK.
+                let autostart = app.autolaunch();
+                match autostart.enable() {
+                    Ok(()) => log::info!("[autostart] 등록 완료 (enabled={:?})", autostart.is_enabled()),
+                    Err(e) => log::error!("[autostart] 등록 실패: {}", e),
+                }
             }
 
             match spawn_backend() {
