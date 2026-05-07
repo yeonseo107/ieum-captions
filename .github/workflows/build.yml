@@ -15,7 +15,7 @@ jobs:
       matrix:
         # 특정 OS 빌드를 끄고 싶으면 해당 줄을 주석 처리 (예: 카페 등에서 Windows만 필요하면 macOS 줄 주석).
         platform:
-          - macos-latest
+          # - macos-latest
           - windows-latest
     runs-on: ${{ matrix.platform }}
 
