@@ -1,12 +1,11 @@
 name: Build
 
-# Tauri 셸을 macOS / Windows에서 빌드 (Python sidecar 통합 전 단계).
+# Tauri 셸 + PyInstaller sidecar를 macOS / Windows에서 빌드.
 # 운용 환경(Windows N100 미니 PC)용 .msi/.exe 산출이 핵심 — macOS는 dev 검증용.
 
 on:
   # 자동 트리거 비활성화 (private 저장소 분 차감 회피).
   # 빌드 필요 시: GitHub Actions 탭 → Build → "Run workflow" 버튼으로 수동 실행.
-  # 또는 자동 트리거 다시 켜고 싶으면 push/pull_request 블록 복구.
   workflow_dispatch:
 
 jobs:
@@ -27,6 +26,34 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      # PyInstaller 산출물(ieum-server) 빌드 → src-tauri/binaries/에 OS별 target-triple 이름으로 배치.
+      # 이게 끝나야 tauri-action이 externalBin으로 픽업해 .app/.msi에 묶음.
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        shell: bash
+        run: pip install -r backend/requirements.txt
+
+      - name: Build PyInstaller sidecar
+        shell: bash
+        working-directory: backend
+        run: pyinstaller ieum-server.spec
+
+      - name: Place sidecar with target-triple name
+        shell: bash
+        run: |
+          TRIPLE=$(rustc -vV | sed -n 's/host: //p')
+          EXT=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then EXT=".exe"; fi
+          mkdir -p src-tauri/binaries
+          mv "backend/dist/ieum-server${EXT}" "src-tauri/binaries/ieum-server-${TRIPLE}${EXT}"
+          ls -la src-tauri/binaries
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
