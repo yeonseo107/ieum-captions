@@ -24,3 +24,5 @@ log = "0.4"
 tauri = { version = "2.11.0", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-autostart = "2"
+# sidecar를 process group(Unix)/JobObject(Windows)으로 spawn — 자식의 자식까지 한 번에 정리.
+command-group = "5"

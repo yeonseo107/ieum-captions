@@ -1,13 +1,16 @@
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::{Manager, RunEvent};
+use command_group::{CommandGroup, GroupChild};
+use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-// Python sidecar 자식 프로세스 핸들 보관 (Tauri 종료 시 정리용).
-struct PythonSidecar(Mutex<Option<Child>>);
+// Python sidecar 핸들 — GroupChild로 묶어서 종료 시 자식 프로세스 트리 전체 정리.
+// (faster-whisper/ctranslate2가 multiprocessing.resource_tracker 등 손주 프로세스를 띄우는데
+// std::process::Child::kill만으론 그 손주들이 PPID=1 고아로 남음.)
+struct PythonSidecar(Mutex<Option<GroupChild>>);
 
-fn spawn_backend() -> std::io::Result<Child> {
+fn spawn_backend() -> std::io::Result<GroupChild> {
     // dev 모드: backend/.venv/bin/python backend/server.py — 코드 수정 즉시 반영
     // release 모드: tauri.conf.json `bundle.externalBin`으로 번들된 PyInstaller 바이너리 (main exe와 같은 폴더)
     if cfg!(debug_assertions) {
@@ -25,12 +28,12 @@ fn spawn_backend() -> std::io::Result<Child> {
 
         log::info!("[sidecar] dev spawn: {} {}", python.display(), script.display());
 
-        Command::new(&python)
-            .arg(&script)
+        let mut cmd = Command::new(&python);
+        cmd.arg(&script)
             .current_dir(&project_root)
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
+            .stderr(Stdio::inherit());
+        cmd.group_spawn()
     } else {
         // externalBin은 main exe와 같은 디렉토리에 target-triple 접미사 제거된 이름으로 배치됨.
         // macOS .app/Contents/MacOS/ieum-server, Windows: ieum-server.exe (main exe 옆).
@@ -40,10 +43,9 @@ fn spawn_backend() -> std::io::Result<Child> {
 
         log::info!("[sidecar] release spawn: {}", sidecar.display());
 
-        Command::new(&sidecar)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()
+        let mut cmd = Command::new(&sidecar);
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        cmd.group_spawn()
     }
 }
 
@@ -59,6 +61,14 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        // macOS 기본 동작은 윈도우 close 시 앱이 dock에 잔존(메뉴바 마이크 인디케이터도 살아있음).
+        // 운용 시나리오(autostart로 항상 실행)에선 윈도우 close = 앱 종료가 자연스러움.
+        // exit(0) 호출이 RunEvent::Exit를 트리거 → sidecar 정리 코드까지 실행됨.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                window.app_handle().exit(0);
+            }
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
