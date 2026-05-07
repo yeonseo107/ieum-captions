@@ -10,6 +10,7 @@
 import asyncio
 import collections
 import json
+import re
 import sys
 import time
 
@@ -22,7 +23,7 @@ from faster_whisper import WhisperModel
 # 오디오 / 모델
 SAMPLE_RATE = 16000
 CHANNELS = 1
-MODEL_SIZE = "large-v3-turbo"
+MODEL_SIZE = "medium"
 COMPUTE_TYPE = "int8"
 
 # VAD segmentation — 5초 고정 청크 대신 발화 단위로 잘라서 STT.
@@ -30,7 +31,7 @@ VAD_AGGRESSIVENESS = 3          # 0(느슨)~3(엄격). 카페 등 잡음 환경 
 FRAME_MS = 30                   # webrtcvad가 받는 프레임 길이 (10/20/30 중 30이 가장 안정)
 SILENCE_END_MS = 600            # 침묵이 600ms 지속되면 발화 종료로 간주
 MAX_UTTERANCE_MS = 15000        # 너무 긴 독백은 강제 컷 (그 안에서 한 번 끊고 다음 발화 계속)
-MIN_UTTERANCE_MS = 500          # 이 이하 발화는 단발성 잡음으로 보고 STT 호출 자체 안 함
+MIN_UTTERANCE_MS = 800          # 이 이하 발화는 단발성 잡음으로 보고 STT 호출 자체 안 함
 PREROLL_MS = 200                # 발화 시작 직전 200ms도 같이 transcribe (첫 음절 잘림 방지)
 UTTERANCE_QUEUE_MAX = 2         # 큐가 이 이상 쌓이면 가장 오래된 발화 버림(잡음에 실 발화가 묻히는 것 방지)
 
@@ -44,6 +45,10 @@ PREROLL_FRAMES = PREROLL_MS // FRAME_MS
 WS_HOST = "localhost"
 WS_PORT = 8765
 
+# 평균 log probability가 이 임계 미만이면 환각으로 간주. 정상 발화는 보통 -0.6 이상,
+# 환각/잡음은 -1.0 이하인 경향. 너무 빡빡하면 정상 발화도 폐기되니 보수적으로.
+LOGPROB_THRESHOLD = -1.0
+
 # Whisper가 무음/잡음에 자주 출력하는 환각 문구.
 # 전체 출력이 정확히 이 중 하나일 때만 필터 (긴 발화 안에 같은 단어가 들어 있을 수 있어 부분 매치는 X).
 _HALLUCINATION_PHRASES = {
@@ -56,6 +61,10 @@ _HALLUCINATION_PHRASES = {
     "구독 부탁드립니다.",
     "구독해주세요",
     "구독해주세요.",
+    "구독과 좋아요 부탁드립니다",
+    "구독과 좋아요 부탁드립니다.",
+    "좋아요와 구독 부탁드립니다",
+    "좋아요와 구독 부탁드립니다.",
     "다음 영상에서 만나요",
     "다음 영상에서 만나요.",
     "다음 영상에서 뵙겠습니다",
@@ -63,9 +72,18 @@ _HALLUCINATION_PHRASES = {
     "다음 영상에서 만납시다",
     "안녕히 계세요",
     "안녕히 계세요.",
+    "이 영상은 유료 광고를 포함하고 있습니다",
+    "이 영상은 유료 광고를 포함하고 있습니다.",
+    "영상이 마음에 드셨다면 구독과 좋아요를 눌러주세요",
+    "영상이 마음에 드셨다면 구독과 좋아요를 눌러주세요.",
     "Thanks for watching.",
     "Thank you.",
 }
+
+# 같은 글자가 8회 이상 연속되면 환각 (ㅋㅋㅋ, 크크크, 고고고 폭주 패턴).
+_REPEATED_CHAR_PATTERN = re.compile(r"(.)\1{7,}")
+# 같은 단어/구(2글자 이상)가 4회 이상 연속 반복 (예: "사회초가 사회초가 사회초가 사회초가").
+_REPEATED_PHRASE_PATTERN = re.compile(r"(\S{2,})(?:\s+\1){3,}")
 
 
 def _normalize_text(s: str) -> str:
@@ -75,9 +93,30 @@ def _normalize_text(s: str) -> str:
 _HALLUCINATION_NORMALIZED = {_normalize_text(p) for p in _HALLUCINATION_PHRASES}
 
 
+def _has_excessive_word_repetition(text: str) -> bool:
+    """다단어 구절 폭주 감지. 8단어 이상에서 유니크 단어 비율이 낮으면 반복 패턴.
+
+    예: "이 경기에서 가장 큰 차이로는" 25회 반복 → 5종 단어 / 125개 = 0.04
+    """
+    words = text.split()
+    if len(words) < 8:
+        return False
+    return len(set(words)) / len(words) < 0.25
+
+
 def is_hallucination(text: str) -> bool:
     norm = _normalize_text(text)
-    return not norm or norm in _HALLUCINATION_NORMALIZED
+    if not norm:
+        return True
+    if norm in _HALLUCINATION_NORMALIZED:
+        return True
+    if _REPEATED_CHAR_PATTERN.search(text):
+        return True
+    if _REPEATED_PHRASE_PATTERN.search(text):
+        return True
+    if _has_excessive_word_repetition(text):
+        return True
+    return False
 
 
 clients: set = set()
@@ -188,7 +227,7 @@ async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> 
     """
     loop = asyncio.get_running_loop()
 
-    def transcribe(audio: np.ndarray) -> str:
+    def transcribe(audio: np.ndarray) -> tuple[str, float]:
         segs, _ = model.transcribe(
             audio,
             language="ko",
@@ -204,14 +243,22 @@ async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> 
             # 모델이 "이건 무음/잡음" 으로 판단하는 임계 — 잡음 audio에서 환각 출력 폐기 강화.
             no_speech_threshold=0.8,
         )
-        return " ".join(s.text.strip() for s in segs).strip()
+        seg_list = list(segs)
+        text = " ".join(s.text.strip() for s in seg_list).strip()
+        # segment별 avg_logprob을 길이 가중 평균. 환각은 보통 -1.0 미만으로 떨어짐.
+        if seg_list:
+            total_chars = sum(len(s.text) for s in seg_list) or 1
+            avg_logprob = sum(s.avg_logprob * len(s.text) for s in seg_list) / total_chars
+        else:
+            avg_logprob = 0.0
+        return text, avg_logprob
 
     while True:
         audio = await utterance_q.get()
         duration = len(audio) / SAMPLE_RATE
 
         t0 = time.perf_counter()
-        text = await loop.run_in_executor(None, transcribe, audio)
+        text, avg_logprob = await loop.run_in_executor(None, transcribe, audio)
         elapsed = time.perf_counter() - t0
 
         if not text:
@@ -219,9 +266,12 @@ async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> 
         if is_hallucination(text):
             print(f"[필터] {text!r} (환각 후보)")
             continue
+        if avg_logprob < LOGPROB_THRESHOLD:
+            print(f"[필터] {text!r} (logprob {avg_logprob:.2f} < {LOGPROB_THRESHOLD})")
+            continue
 
         rtf = elapsed / duration if duration > 0 else 0.0
-        print(f"[STT] {text}  (발화 {duration:.2f}s, 처리 {elapsed:.2f}s, RTF {rtf:.2f})")
+        print(f"[STT] {text}  (발화 {duration:.2f}s, 처리 {elapsed:.2f}s, RTF {rtf:.2f}, logprob {avg_logprob:.2f})")
         await broadcast({"type": "caption", "text": text})
 
 
