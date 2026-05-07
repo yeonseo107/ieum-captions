@@ -30,6 +30,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "externalBin": [
+      "binaries/ieum-server"
+    ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

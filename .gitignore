@@ -31,6 +31,11 @@ MANIFEST
 #   .spec 파일은 빌드 재현 위해 git에 트래킹.
 *.manifest
 
+# Tauri sidecar 바이너리 — PyInstaller 산출물이 OS별 target-triple 이름으로 들어옴.
+# 빌드 시점에 CI/로컬에서 채워넣음. .gitkeep으로 폴더만 트래킹.
+src-tauri/binaries/*
+!src-tauri/binaries/.gitkeep
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

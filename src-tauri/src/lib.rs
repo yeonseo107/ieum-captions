@@ -7,28 +7,43 @@ use tauri::{Manager, RunEvent};
 struct PythonSidecar(Mutex<Option<Child>>);
 
 fn spawn_backend() -> std::io::Result<Child> {
-    // dev 모드: backend/.venv/bin/python backend/server.py
-    // 운용 모드(추후): PyInstaller로 빌드된 server(.exe)를 sidecar binary로 등록 후 tauri-plugin-shell 사용 예정.
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("src-tauri의 부모 디렉토리가 있어야 함")
-        .to_path_buf();
+    // dev 모드: backend/.venv/bin/python backend/server.py — 코드 수정 즉시 반영
+    // release 모드: tauri.conf.json `bundle.externalBin`으로 번들된 PyInstaller 바이너리 (main exe와 같은 폴더)
+    if cfg!(debug_assertions) {
+        let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri의 부모 디렉토리가 있어야 함")
+            .to_path_buf();
 
-    let python = project_root
-        .join("backend")
-        .join(".venv")
-        .join("bin")
-        .join("python");
-    let script = project_root.join("backend").join("server.py");
+        let python = project_root
+            .join("backend")
+            .join(".venv")
+            .join("bin")
+            .join("python");
+        let script = project_root.join("backend").join("server.py");
 
-    log::info!("[sidecar] spawn: {} {}", python.display(), script.display());
+        log::info!("[sidecar] dev spawn: {} {}", python.display(), script.display());
 
-    Command::new(&python)
-        .arg(&script)
-        .current_dir(&project_root)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
+        Command::new(&python)
+            .arg(&script)
+            .current_dir(&project_root)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+    } else {
+        // externalBin은 main exe와 같은 디렉토리에 target-triple 접미사 제거된 이름으로 배치됨.
+        // macOS .app/Contents/MacOS/ieum-server, Windows: ieum-server.exe (main exe 옆).
+        let mut sidecar = std::env::current_exe()?;
+        sidecar.pop();
+        sidecar.push(if cfg!(windows) { "ieum-server.exe" } else { "ieum-server" });
+
+        log::info!("[sidecar] release spawn: {}", sidecar.display());
+
+        Command::new(&sidecar)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
