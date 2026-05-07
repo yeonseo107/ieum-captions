@@ -84,8 +84,6 @@ _HALLUCINATION_PHRASES = {
     "영상이 마음에 드셨다면 구독과 좋아요를 눌러주세요.",
     "Thanks for watching.",
     "Thank you.",
-    # TV 뉴스 사인오프 — Whisper 환각이 아니라 거실 TV에서 흘러들어온 실제 방송 음성.
-    # 무지향성 마이크의 본질적 한계라 정확 매치로 누적 차단.
     "MBC 뉴스 김수근입니다",
     "MBC 뉴스 김수근입니다.",
 }
