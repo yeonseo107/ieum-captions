@@ -14,11 +14,24 @@ import multiprocessing
 import re
 import sys
 import time
+from pathlib import Path
 
-# PyInstaller frozen binary에서 stdout이 fully-buffered로 잡혀 Tauri/리다이렉트 환경에서 로그가
-# 종료 시점에야 보이는 문제 회피. dev(터미널 attached)에선 이미 line-buffered라 영향 없음.
-sys.stdout.reconfigure(line_buffering=True)
-sys.stderr.reconfigure(line_buffering=True)
+# PyInstaller windowed mode(console=False)로 빌드된 Windows 바이너리에선 sys.stdout/stderr이 None.
+# 이 상태로 reconfigure 호출 시 AttributeError, print() 호출도 OSError. 사용자 홈에 로그 파일로
+# redirect — 운용엔 영향 없고 추후 디버깅 가능.
+# (macOS/Linux dev에선 stdout이 정상 stream이라 이 분기 안 탐.)
+if sys.stdout is None or sys.stderr is None:
+    log_dir = Path.home() / ".ieum-captions"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = open(log_dir / "server.log", "a", encoding="utf-8", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = log_file
+    if sys.stderr is None:
+        sys.stderr = log_file
+else:
+    # Tauri/리다이렉트 환경에서 stdout이 fully-buffered로 잡혀 로그가 종료 시점에야 보이는 문제 회피.
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
 
 import numpy as np
 import sounddevice as sd
