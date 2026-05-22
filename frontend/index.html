@@ -9,13 +9,15 @@
 <body>
   <main id="captions" aria-live="polite"></main>
 
+  <div id="pause-indicator" aria-live="polite">일시정지</div>
+
   <div id="ws-status" class="disconnected" aria-hidden="true" title="STT 백엔드 연결 상태"></div>
 
   <div id="controls">
     <input id="caption-input" type="text" placeholder="자막 입력 후 Enter" />
     <button id="demo-btn" type="button">Demo 재생</button>
     <button id="reset-btn" type="button">리셋</button>
-    <span class="hint">컨트롤 토글: <kbd>Esc</kbd></span>
+    <span class="hint">컨트롤 토글: <kbd>Esc</kbd> · 일시정지: <kbd>Space</kbd></span>
   </div>
 
   <script src="app.js"></script>

@@ -42,7 +42,7 @@ from faster_whisper import WhisperModel
 # 오디오 / 모델
 SAMPLE_RATE = 16000
 CHANNELS = 1
-MODEL_SIZE = "small"     # medium → small. CPU 처리 ~3배 빠름. 또박또박한 거실 대화에선 정확도 차이 체감 적음.
+MODEL_SIZE = "large-v3-turbo"   # 디코더 4층(small은 12층)이라 발화 길수록 small과 격차 작고, 정확도는 large-v3 수준.
 COMPUTE_TYPE = "int8"
 
 # VAD segmentation — 5초 고정 청크 대신 발화 단위로 잘라서 STT.
@@ -142,6 +142,11 @@ def is_hallucination(text: str) -> bool:
 
 clients: set = set()
 
+# 일시정지 상태 — 프론트엔드에서 {"type":"pause"|"resume"} 메시지로 토글.
+# 외할머니가 자막을 따라 읽을 때 Whisper가 그 음성을 다시 인식해 무한 루프 도는 걸 막기 위함.
+# 일시정지 중엔 VAD 진행 중 발화 폐기 + transcribe도 건너뜀 → CPU 절약.
+_paused = False
+
 
 class VADSegmenter:
     """프레임을 흘려넣으면서 발화 시작/끝을 검출. 발화가 끝나면 float32 audio를 반환."""
@@ -223,6 +228,11 @@ async def capture_and_segment(seg: VADSegmenter, utterance_q: asyncio.Queue) -> 
     try:
         while True:
             frame = await frame_q.get()
+            if _paused:
+                # 일시정지 중: 진행 중이던 발화가 있다면 폐기, 새 프레임도 VAD에 흘리지 않음.
+                if seg.in_speech:
+                    seg._reset()
+                continue
             audio = seg.feed(frame)
             if audio is not None:
                 duration = len(audio) / SAMPLE_RATE
@@ -276,12 +286,18 @@ async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> 
 
     while True:
         audio = await utterance_q.get()
+        if _paused:
+            # 일시정지 직전에 큐에 들어가 있던 발화 폐기.
+            continue
         duration = len(audio) / SAMPLE_RATE
 
         t0 = time.perf_counter()
         text, avg_logprob = await loop.run_in_executor(None, transcribe, audio)
         elapsed = time.perf_counter() - t0
 
+        if _paused:
+            # transcribe 도는 중에 일시정지된 경우 broadcast 안 함.
+            continue
         if not text:
             continue
         if is_hallucination(text):
@@ -297,11 +313,23 @@ async def transcribe_worker(model: WhisperModel, utterance_q: asyncio.Queue) -> 
 
 
 async def handle_client(websocket) -> None:
+    global _paused
     clients.add(websocket)
     print(f"[WS] 클라이언트 연결 ({len(clients)}개)")
     try:
-        async for _ in websocket:
-            pass
+        async for raw in websocket:
+            # 프론트엔드 → 백엔드 제어 메시지 처리. 현재는 pause/resume만.
+            try:
+                msg = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            mtype = msg.get("type") if isinstance(msg, dict) else None
+            if mtype == "pause" and not _paused:
+                _paused = True
+                print("[제어] 일시정지")
+            elif mtype == "resume" and _paused:
+                _paused = False
+                print("[제어] 재개")
     finally:
         clients.discard(websocket)
         print(f"[WS] 클라이언트 끊김 ({len(clients)}개)")

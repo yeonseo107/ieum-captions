@@ -76,6 +76,30 @@ body {
   transform: translateY(0);
 }
 
+/* 일시정지 배지 — 화면 상단 가운데. 자막 위에 떠 있되 가독성 안 가림 */
+#pause-indicator {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(-0.5rem);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  font-weight: 600;
+  color: var(--fg);
+  background: rgba(0, 0, 0, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0.5rem 1.5rem;
+  border-radius: 2rem;
+  z-index: 20;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+body.paused #pause-indicator {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 #ws-status {
   position: fixed;
   top: 1rem;

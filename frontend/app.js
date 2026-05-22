@@ -21,6 +21,9 @@ function isAtBottom() {
 }
 
 function addCaption(text) {
+  // 일시정지 중엔 백엔드가 이미 안 보내지만, demo/수동 입력/이전 미전송 메시지까지 막는 안전망.
+  if (paused) return;
+
   const trimmed = text.trim();
   if (!trimmed) return;
 
@@ -92,12 +95,33 @@ demoBtn.addEventListener('click', () => {
 
 resetBtn.addEventListener('click', clearAll);
 
+// --- 일시정지 상태 (Space로 토글) ---
+// 외할머니가 자막을 따라 읽을 때 Whisper가 그 음성을 다시 인식하는 피드백 루프 차단용.
+// 백엔드에도 메시지 보내서 STT 자체 중단 — 노트북 CPU 절약.
+let paused = false;
+
+function togglePause() {
+  paused = !paused;
+  document.body.classList.toggle('paused', paused);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: paused ? 'pause' : 'resume' }));
+  }
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     controlsEl.classList.toggle('hidden');
     if (!controlsEl.classList.contains('hidden')) {
       inputEl.focus();
     }
+    return;
+  }
+  if (e.key === ' ') {
+    // 입력창에 포커스 있을 땐 일반 스페이스 입력 허용 — 자막 텍스트에 공백 못 치면 곤란.
+    if (document.activeElement === inputEl) return;
+    // 페이지 스크롤 기본 동작 차단 (스페이스 = 한 화면 아래로).
+    e.preventDefault();
+    togglePause();
   }
 });
 
@@ -108,6 +132,7 @@ inputEl.focus();
 const WS_URL = 'ws://localhost:8765';
 const WS_RETRY_MS = 2000;
 let wsConnected = false;
+let ws = null;   // togglePause에서 send 하려고 outer scope에 보관.
 
 function setWSStatus(connected) {
   wsStatusEl.classList.toggle('connected', connected);
@@ -115,12 +140,16 @@ function setWSStatus(connected) {
 }
 
 function connectWS() {
-  const ws = new WebSocket(WS_URL);
+  ws = new WebSocket(WS_URL);
 
   ws.addEventListener('open', () => {
     if (!wsConnected) console.log('[WS] STT 백엔드 연결됨');
     wsConnected = true;
     setWSStatus(true);
+    // 재연결 시 paused 상태 재동기화 — 백엔드 재시작이나 새 연결이면 거기 _paused는 false에서 시작.
+    if (paused) {
+      ws.send(JSON.stringify({ type: 'pause' }));
+    }
   });
 
   ws.addEventListener('message', (e) => {
