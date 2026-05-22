@@ -24,11 +24,32 @@ body {
 #captions {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   align-items: center;
   height: 100vh;
   width: 100vw;
   padding: 6vh 6vw;
+  overflow-y: auto;
+  /* justify-content: flex-end는 overflow와 충돌해 컨텐츠 상단이 잘림 — 첫 줄 margin-top: auto로 대체 */
+}
+
+/* 줄 수가 컨테이너보다 적을 때만 하단 정렬 효과. 넘치기 시작하면 margin-top: auto가 0으로 collapse → 자연 스크롤 */
+.caption-line:first-child {
+  margin-top: auto;
+}
+
+/* 스크롤바 — 거실에서 멀리서도 인식되도록 살짝 가시적이되 자막 가독성 해치지 않을 정도 */
+#captions::-webkit-scrollbar {
+  width: 10px;
+}
+#captions::-webkit-scrollbar-track {
+  background: transparent;
+}
+#captions::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+}
+#captions::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .caption-line {
@@ -41,6 +62,7 @@ body {
   max-width: 90%;
   word-break: keep-all;
   overflow-wrap: anywhere;
+  flex-shrink: 0;   /* 자막 줄이 스크롤 컨테이너 안에서 강제 축소되지 않게 */
 
   opacity: 0;
   transform: translateY(0.6em);

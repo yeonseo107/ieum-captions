@@ -5,15 +5,27 @@ const resetBtn = document.getElementById('reset-btn');
 const controlsEl = document.getElementById('controls');
 const wsStatusEl = document.getElementById('ws-status');
 
-const MAX_LINES = 5;
+// 히스토리 누적. 너무 많아지면 가장 오래된 줄부터 정리 (24h 거실 대화 기준 1000줄이면 ~3시간 분량).
+// 단, 사용자가 위로 스크롤해 히스토리를 읽는 중에는 trim 안 함 — 스크롤 위치 점프 방지.
+const MAX_LINES = 1000;
 const ANIM_MS = 350;
 const DEMO_INTERVAL_MS = 2500;
+// 사용자가 바닥에서 이 거리(px) 안에 있으면 "라이브 모드"로 간주하고 새 자막 도착 시 자동 스크롤.
+const SCROLL_STICK_THRESHOLD_PX = 80;
 
 const lines = [];
+
+function isAtBottom() {
+  const dist = captionsEl.scrollHeight - captionsEl.scrollTop - captionsEl.clientHeight;
+  return dist < SCROLL_STICK_THRESHOLD_PX;
+}
 
 function addCaption(text) {
   const trimmed = text.trim();
   if (!trimmed) return;
+
+  // append 전에 라이브 모드였는지 기록 — append 후엔 scrollHeight가 늘어나 isAtBottom 판정이 바뀜.
+  const wasAtBottom = isAtBottom();
 
   const line = document.createElement('div');
   line.className = 'caption-line';
@@ -23,9 +35,15 @@ function addCaption(text) {
 
   requestAnimationFrame(() => line.classList.add('visible'));
 
-  if (lines.length > MAX_LINES) {
-    // 가장 오래된 줄은 즉시 DOM에서 제거. 위로 미는 애니메이션 없음 — 남은 줄들은 한 프레임 안에 새 위치로 스냅.
-    lines.shift().remove();
+  // 라이브 모드일 때만 오래된 줄 정리 + 자동 스크롤. 히스토리 읽는 중엔 둘 다 하지 않음.
+  if (wasAtBottom) {
+    while (lines.length > MAX_LINES) {
+      lines.shift().remove();
+    }
+    // DOM 반영 직후 scrollHeight가 갱신된 시점에 스크롤.
+    requestAnimationFrame(() => {
+      captionsEl.scrollTop = captionsEl.scrollHeight;
+    });
   }
 }
 
