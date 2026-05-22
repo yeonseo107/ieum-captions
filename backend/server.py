@@ -42,13 +42,13 @@ from faster_whisper import WhisperModel
 # 오디오 / 모델
 SAMPLE_RATE = 16000
 CHANNELS = 1
-MODEL_SIZE = "medium"
+MODEL_SIZE = "small"     # medium → small. CPU 처리 ~3배 빠름. 또박또박한 거실 대화에선 정확도 차이 체감 적음.
 COMPUTE_TYPE = "int8"
 
 # VAD segmentation — 5초 고정 청크 대신 발화 단위로 잘라서 STT.
 VAD_AGGRESSIVENESS = 3          # 0(느슨)~3(엄격). 카페 등 잡음 환경 견디려면 3.
 FRAME_MS = 30                   # webrtcvad가 받는 프레임 길이 (10/20/30 중 30이 가장 안정)
-SILENCE_END_MS = 600            # 침묵이 600ms 지속되면 발화 종료로 간주
+SILENCE_END_MS = 400            # 침묵이 400ms 지속되면 발화 종료로 간주 (체감 지연 -200ms, 사이 짧은 멈춤은 한 발화로 안 묶임)
 MAX_UTTERANCE_MS = 15000        # 너무 긴 독백은 강제 컷 (그 안에서 한 번 끊고 다음 발화 계속)
 MIN_UTTERANCE_MS = 800          # 이 이하 발화는 단발성 잡음으로 보고 STT 호출 자체 안 함
 PREROLL_MS = 200                # 발화 시작 직전 200ms도 같이 transcribe (첫 음절 잘림 방지)
